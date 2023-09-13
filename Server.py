@@ -31,8 +31,8 @@ class Client:
         self.addr = addr
         guest_count+=1
         self.name = f'guest{guest_count}'
-        self.send(self.name, type='name')
         self.handle_client()
+        self.send(self.name, type='name')
 
     @threaded
     def handle_client(self):
@@ -56,6 +56,9 @@ class Client:
                     continue
                 if type == 'name':
                     new_name = msg
+                    if new_name in clients.keys():
+                        self.send("Este nome já existe!")
+                        continue
                     clients[new_name] = clients.pop(self.name)
                     self.send(new_name, type='name')
                     print(f"[Server] Usuário {self.name} mudou para {new_name}\n")
@@ -86,6 +89,9 @@ class Client:
                 continue
             elif type == 'game_invite':
                 # Cria um grupo com nome 'group_name' e manda o nome para o alvo
+                if target == self.name:
+                    self.send("Você não pode convidar a sí mesmo!")
+                    continue
                 groups['group_name'] = [self.name, target]
                 self.send(msg='group_name', type='game_invite', target=target, origin=self.name)
                 continue
@@ -104,6 +110,8 @@ class Client:
                 del clients[self.name]
                 conn.close()
                 break
+            elif target != 'None':
+                self.send(type=type, origin=self.name, target=target)
 
     # Função para envio de mensagems encapsuladas com o cabeçalho
     @threaded
@@ -111,7 +119,7 @@ class Client:
         client = self.conn
         if target:
             try:
-                target = clients[target].conn
+                target_conn = clients[target].conn
             except:
                 self.send('Usuário não encontrado!')
                 return
@@ -122,17 +130,18 @@ class Client:
             msg_len = '0'
         header = msg_len + f' {type} {origin}'
         header = header + ' ' * (HEADER - len(header))
-        print(header.encode('utf-8').split()) # debug
+        print(f'Enviando: {header.encode("utf-8").split()} alvo: {target} origem: {self.name}') # debug
         if target:
-            target.send(header.encode('utf-8'))
+            target_conn.send(header.encode('utf-8'))
         else:
             client.send(header.encode('utf-8'))
         if msg_len != '0':
+            print(msg)
             if target:
                 # O alvo manda a confirmação para a classe Client dele
                 # a qual eu não tenho acesso, logo, fazemos de forma assíncrona
                 time.sleep(0.01)
-                target.send(msg)
+                target_conn.send(msg)
             else:
                 self.s.acquire()
                 client.send(msg)
@@ -143,6 +152,7 @@ class Client:
         for client in groups[group]:
             if client != self.name:
                 if x > 50:
+                    # Manda o nome do oponente junto com a marca pois mandar em origin ou target direcionado a sí interfere na lógica do sistema
                     self.send(msg=f'X {client}', type='start_game')
                     self.send(msg='O', type='start_game', origin=self.name, target=client)
                 else:

@@ -1,5 +1,7 @@
 import tkinter as tk
 from tkinter.scrolledtext import ScrolledText
+from copy import deepcopy
+from numpy import array
 import socket
 import threading
 import time
@@ -26,11 +28,12 @@ def threaded(func):
 
 class Game(tk.Toplevel):
 
-    global name
+    global name, game
     tab = None
+    window = None
 
     def __init__(self, master, chat_id):
-        menu.screen.insert(tk.END, 'Chat iniciado!')
+        menu.screen.insert(tk.END, 'Jogo iniciado!')
         super().__init__(master)
         self.geometry('400x600')
 
@@ -43,19 +46,16 @@ class Game(tk.Toplevel):
         self.id = chat_id
         self.protocol('WM_DELETE_WINDOW', self.window_closed)
 
+        tk.Label(self.chat_frame, text=f'Usuário: {name}').pack(side='top')
+
         self.chat_view = ScrolledText(self.chat_frame, wrap=tk.WORD, height=20, width=50, state='disabled')
         self.chat_view.pack(padx=10, pady=5)
 
-        self.entry = tk.Entry(self.chat_frame, width=50)
-        self.entry.pack(padx=10, pady=5)
-        self.entry.bind('<Return>', self.input_entry)
+        self.chat_label = tk.Label(self.chat_frame, text='Chat:')
+        self.chat_label.pack(padx=10, pady=5, side='left')
 
-    def game_start(self, mark, oponent):
-        self.mark = mark
-        self.oponent = oponent
-        self.tab = self.gera_tabuleiro()
-        self.over = False
-        self.bind('<Button-1>', self.get_mouse)
+        self.entry = tk.Entry(self.chat_frame, width=50)
+        self.entry.pack(padx=10, pady=5, side='right')
 
         self.game_screen.create_line(50, 0, 50, 150, width=3)
         self.game_screen.create_line(100, 0, 100, 150, width=3)
@@ -75,14 +75,25 @@ class Game(tk.Toplevel):
         self.label = tk.Label(self, text="Text area!", font=("Arial", 10))
         self.label.place(x=50, y=550)
 
+        self.button = tk.Button(self, text='Desistir', command=self.desistir)
+        self.button.place(x=300, y=550)
+
+        self.bind('<Button-1>', self.get_mouse)
+        self.entry.bind('<Return>', self.input_entry)
+        self.focus()
+
+    def game_start(self, mark, oponent):
+        self.mark = mark
+        self.oponent = oponent
+        self.tab = self.gera_tabuleiro()
+        self.over = False
+
         if self.mark == 'X':
             self.turn = True
             self.label['text'] = 'Você começa!'
         elif self.mark == 'O':
             self.turn = False
             self.label['text'] = 'Oponente começa!'
-        else:
-            print(self.mark)
         
     def gera_tabuleiro(self):
         return [[[None, None, None] for i in range(3)] for j in range(3)]
@@ -99,6 +110,9 @@ class Game(tk.Toplevel):
     def pos_livres(self):
         return [[k,i,j] for k in range(3) for i in range(3) for j in range(3) if self.tab[k][i][j] == None]
 
+    def pos_mark(self):
+        return [[k,i,j] for k in range(3) for i in range(3) for j in range(3) if self.tab[k][i][j] != None]
+
     def tab_cheio(self):
         for k in range(3):
             for i in range(3):
@@ -108,26 +122,68 @@ class Game(tk.Toplevel):
         return True
 
     def avalia(self):
-        for grid in self.tab:
-            for line in grid:
-                if line.count('X') == 3: return 1
-                if line.count('O') == 3:return -1
-            for j in range(3):
-                row = [grid[i][j] for i in range(3)]
-                if row.count('X') == 3: return 1
-                if row.count('O') == 3: return -1
-            diagonal = [grid[i][j] for i in range(3) for j in range(3) if i == j]
-            if diagonal.count('X') == 3: return 1
-            if diagonal.count('O') == 3: return -1
-            diagonal = [grid[i][2-j] for i in range(3) for j in range(3) if i == j]
-            if diagonal.count('X') == 3: return 1
-            if diagonal.count('O') == 3: return -1
-        for i in range(3):
-            for j in range(3):
-                vertical = [self.tab[k][i][j] for k in range(3)]
-                if vertical.count('X') == 3: return 1
-                if vertical.count('O') == 3: return -1
+        visitados = []
+        for pos in self.pos_mark():
+            atual = [pos[0], pos[1], pos[2]]
+            mark = self.tab[pos[0]][pos[1]][pos[2]]
+            visitados.append(atual)
+            vizinhos = self.neighbors(atual, visitados)
+            # Analisa os elementos vizinhos e checa se eles formam uma reta
+            for v in vizinhos:
+                if self.tab[v[0]][v[1]][v[2]] == mark:
+                    passo = array(v) - array(atual)
+                    next = array(v) + array(passo)
+                    print(f'atual: {atual}, v: {v}, next: {next}, mark: {mark}')
+                    try:
+                        if self.tab[next[0]][next[1]][next[2]] == mark:
+                            if mark == 'X':
+                                return 1
+                            elif mark == 'O':
+                                return -1
+                    except:
+                        pass
         return 0
+
+    # Algoritimo para criar uma lista de possiveis vetores de n dimenções com tamanho definido 
+    # Exemplo: (1, 0, 0) <- primeiro vetor de 3 dimenções com tamanho 1
+    def permutations(self, val, size):
+        aux = []
+        perms = []
+        for i in range(size):
+            aux.append(0)
+        perms.append(aux)
+        for i in range(size):
+            for k in range(len(perms)):
+                aux = self.permute(val, perms[k])
+                for j in aux:
+                    if j not in perms:
+                        perms.append(j)
+        perms.pop(0)
+        return perms
+
+    # Gera novos vetores baseado em um vetor inicial ao adicionar o vetor de possíveis permutações vetoriais
+    # Usado como auxiliar para o algoritimo acima
+    def permute(self, val, lista):
+        perms = []
+        # Insere o tamanho do vetor normal e invertido em cada dimenção do vetor para gerar novos vetores
+        for i in range(len(lista)):
+            if lista[i] != val:
+                lista[i] = val
+                perms.append(deepcopy(lista))
+                lista[i] = val * -1
+                perms.append(deepcopy(lista))
+                lista[i] = 0
+        return perms
+        
+    # Pega os possiveis elementos vizinhos de um espaço no tabuleiro
+    def neighbors(self, pos, visitados):
+        n = []
+        moves = self.permutations(1, 3) # Utiliza vetores de tamanho 1 para encontrar elementos vizinhos
+        for move in moves:
+            n_pos = array(pos) + array(move)
+            if list(n_pos) not in visitados and (n_pos >= 0).all() and (n_pos < 3).all():
+                n.append(n_pos)
+        return n
 
     def fim(self):
         if self.avalia() == 1:
@@ -147,6 +203,18 @@ class Game(tk.Toplevel):
             return True
         return False
 
+    def desistir(self, oponent = False):
+        if not self.over:
+            if not oponent:
+                send(type='forfeit', target=self.oponent)
+                self.over = True
+                self.label['text'] = 'Você perdeu!'
+                self.button.config(text='Rematch', command=self.send_rematch)
+            else:
+                self.over = True
+                self.label['text'] = 'Oponente desistiu!'
+                self.button.config(text='Rematch', command=self.send_rematch)
+
     def get_mouse(self, event):
         x = self.winfo_pointerx() - self.winfo_rootx()
         y = self.winfo_pointery() - self.winfo_rooty()
@@ -162,6 +230,8 @@ class Game(tk.Toplevel):
                         if not self.over:
                             self.label['text'] = 'Vez do oponente!'
                             self.turn = False
+                        else:
+                            self.button.config(text='Rematch', command=self.send_rematch)
                         break
 
     def oponent_play(self, pos):
@@ -175,9 +245,47 @@ class Game(tk.Toplevel):
         if not self.over:
             self.label['text'] = 'Sua vez!'
             self.turn = True
+        else:
+            self.button.config(text='Rematch', command=self.send_rematch)
+
+    def send_rematch(self):
+        send(type='rematch', target=self.oponent)
+
+    def rematch(self):
+        if self.window:
+            self.window.destroy()
+        self.window = tk.Toplevel(self.master)
+        self.window.geometry('200x100')
+        tk.Label(self.window, text=f'{self.oponent} está requisitando um novo jogo!').pack()
+        tk.Button(self.window, text='Aceitar', command=lambda: self.restart(oponent=False)).pack(side='left', padx=10)
+        tk.Button(self.window, text='Recusar', command=self.refuse).pack(side='right', padx=10)
+        self.window.focus()
+        self.window.lift()
+
+    def refuse(self):
+        send(type='refuse_rematch', target=self.oponent)
+        self.window.destroy()
+        self.window_closed()
+
+    def restart(self, oponent=False):
+        if self.window:
+            self.window.destroy()
+        if not oponent:
+            send(type='restart', target=self.oponent)
+        self.tab = self.gera_tabuleiro()
+        self.game_screen.delete('game')
+        self.over = False
+        self.button.config(text='Desistir', command=self.desistir)
+        if self.mark == 'X':
+            self.turn = True
+            self.label['text'] = 'Você começa!'
+        elif self.mark == 'O':
+            self.turn = False
+            self.label['text'] = 'Oponente começa!'
 
     def input_entry(self, event):
         msg = self.entry.get()
+        self.entry.delete(0, tk.END)
         if msg:
             send(msg, group=self.id)
             self.chat_view.configure(state='normal')
@@ -187,6 +295,7 @@ class Game(tk.Toplevel):
 
     def window_closed(self):
         send(type='closed_chat', group=self.id)
+        game = None
         self.destroy()
 
 class Main_menu(tk.Frame):
@@ -239,11 +348,12 @@ class Main_menu(tk.Frame):
             self.window = tk.Toplevel(self.master)
             self.window.protocol('WM_DELETE_WINDOW', self.window_closed)
             self.window.title('Change name')
-            self.window.geometry('200x200')
+            self.window.geometry('200x50')
 
-            tk.Label(self.window, text='Digite o seu novo nome').pack(side='top')
+            tk.Label(self.window, text='Digite o seu novo nome', width=100).pack(side='top')
             entry = tk.Entry(self.window, width=50)
             entry.pack(side='top')
+            entry.focus()
             entry.bind('<Return>', lambda event: self.change_name(event, entry.get()))
 
     def change_name(self, event, new_name):
@@ -258,12 +368,13 @@ class Main_menu(tk.Frame):
             self.window = tk.Toplevel(self.master)
             self.window.protocol('WM_DELETE_WINDOW', self.window_closed)
             self.window.title('Chat interface')
-            self.window.geometry('200x200')
+            self.window.geometry('250x100')
 
-            tk.Label(self.window, text='Digite o nome do usuário a convidar').pack(padx=10, side='top')
+            tk.Label(self.window, text='Digite o nome do usuário a convidar', width=150).pack(padx=10, side='top')
 
             entry = tk.Entry(self.window, width=60)
             entry.pack(padx=10, side='top')
+            entry.focus()
             entry.bind('<Return>', lambda event: self.game_invite(event, entry.get()))
 
     def accept(self, target):
@@ -276,7 +387,7 @@ class Main_menu(tk.Frame):
     def refuse(self, target):
         # Manda mensagem de recusa para a origem do convite
         global group
-        send(type='refuse', target=target)
+        send(type='refuse', target=target, group=group)
         group = None
         self.popup.destroy()
 
@@ -303,10 +414,12 @@ class Main_menu(tk.Frame):
         group = group_name
         self.popup = tk.Toplevel(root)
         self.popup.title('Chat invite')
-        self.popup.geometry('200x200')
+        self.popup.geometry('250x100')
         tk.Label(self.popup, text=f'{origin} está o convidando para um jogo!').pack(side='top', padx=10)
-        tk.Button(self.popup, text='Aceitar', command=lambda: self.accept(origin)).pack(side='left', padx=10, pady=10)
-        tk.Button(self.popup, text='Recusar', command=lambda: self.refuse(origin)).pack(side='right', padx=10, pady=10)
+        tk.Button(self.popup, text='Aceitar', command=lambda: self.accept(origin)).pack(side='left', padx=20, pady=10)
+        tk.Button(self.popup, text='Recusar', command=lambda: self.refuse(origin)).pack(side='right', padx=20, pady=10)
+        self.popup.focus()
+        self.popup.lift()
 
     def window_closed(self):
         self.window.destroy()
@@ -334,9 +447,24 @@ def listen2server():
             group = None
             menu.receive_answer(origin)
             continue
+        if type == 'rematch':
+            if game:
+                game.rematch()
+            else:
+                send(type='refuse_rematch', target=origin)
+        if type == 'refuse_rematch':
+            game.window_closed()
+            menu.insert(f'{origin} recusou seu convite!')
+            continue
         if type == 'closed_chat':
             menu.insert(f'{origin} encerrou a conexão')
             game.destroy()
+            continue
+        if type == 'restart':
+            game.restart(oponent=True)
+            continue
+        if type == 'forfeit':
+            game.desistir(oponent=True)
             continue
         if msg_len:
             # Checa se mensagem veio do socket local
